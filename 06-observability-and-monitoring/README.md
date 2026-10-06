@@ -22,6 +22,7 @@ Open:
 - Grafana dashboard: <http://localhost:3000/d/llm-support-monitoring>
 - Swagger UI: <http://localhost:8000/docs>
 - Prometheus: <http://localhost:9090>
+![Grafana monitoring dashboard](./dashboard.png)
 
 Real-time metrics appear within a few seconds. The batch worker runs every 15
 seconds by default, so batch metrics appear slightly later.
