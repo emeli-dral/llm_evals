@@ -1,0 +1,12 @@
+services:
+  app:
+    environment:
+      LLM_MODE: openai
+
+  batch:
+    environment:
+      LLM_MODE: openai
+
+  loadgen:
+    environment:
+      LOADGEN_REPEAT: ${LOADGEN_REPEAT:-false}

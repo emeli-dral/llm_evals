@@ -1,0 +1,121 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: observability
+      POSTGRES_USER: tutorial
+      POSTGRES_PASSWORD: tutorial
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tutorial -d observability"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  tempo:
+    image: grafana/tempo:3.0.0
+    command: ["-config.file=/etc/tempo.yml"]
+    volumes:
+      - ./config/tempo.yml:/etc/tempo.yml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200"
+      - "4318:4318"
+
+  app:
+    build: .
+    image: llm-observability-tutorial:local
+    environment:
+      DATABASE_URL: postgresql://tutorial:tutorial@postgres:5432/observability
+      LLM_MODE: mock
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-6-astra}
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://tempo:4318/v1/traces
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tempo:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  batch:
+    image: llm-observability-tutorial:local
+    pull_policy: never
+    command: ["python", "batch.py"]
+    environment:
+      DATABASE_URL: postgresql://tutorial:tutorial@postgres:5432/observability
+      BATCH_INTERVAL_SECONDS: ${BATCH_INTERVAL_SECONDS:-15}
+      LLM_MODE: mock
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-6-astra}
+      OPENAI_JUDGE_MODEL: ${OPENAI_JUDGE_MODEL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  loadgen:
+    image: llm-observability-tutorial:local
+    pull_policy: never
+    command: ["python", "loadgen.py"]
+    environment:
+      APP_URL: http://app:8000
+      LOADGEN_INTERVAL_SECONDS: ${LOADGEN_INTERVAL_SECONDS:-2}
+      LOADGEN_REPEAT: ${LOADGEN_REPEAT:-true}
+      ERROR_PROBABILITY: ${ERROR_PROBABILITY:-0.08}
+    depends_on:
+      app:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:latest
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      app:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:13.1.3
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_USERS_DEFAULT_THEME: light
+      POSTGRES_PASSWORD: tutorial
+    volumes:
+      - ./config/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./config/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./config/dashboard.json:/var/lib/grafana/dashboards/dashboard.json:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - postgres
+      - tempo
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  tempo_data:
+  grafana_data:
